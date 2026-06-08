@@ -907,7 +907,8 @@ class TimeSeriesWidget(QWidget):
     
     def keyPressEvent(self, event):
         """Handle key press events (spacebar for playback toggle)."""
-        if event.key() == Qt.Key_Space and not event.isAutoRepeat():
+        # Spacebar key code is 32
+        if event.key() == 32 and not event.isAutoRepeat():
             event.accept()
             if self.is_playing:
                 self.stop_playback()
