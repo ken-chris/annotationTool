@@ -222,6 +222,9 @@ class SpectrogramWidget(QWidget):
             if self.channel_combo.count() > 0:
                 self.channel_combo.setCurrentIndex(0)
         
+        # Initialize blue selection region at 0-10% of data duration
+        self.set_region(0, sensor_data.duration * 0.1)
+        
         # Compute spectrograms
         self.update_all_spectrograms()
     
@@ -830,21 +833,25 @@ class SpectrogramWidget(QWidget):
         )
         
         if reply == QMessageBox.StandardButton.Yes:
-            # Remove all visual regions
-            for annotation in list(self.annotations):
-                if annotation in self.annotation_regions:
-                    for plot_widget, region in self.annotation_regions[annotation]:
-                        try:
-                            plot_widget.removeItem(region)
-                        except:
-                            pass
-            
-            # Clear storage
-            self.annotations.clear()
-            self.annotation_regions.clear()
-            self.selected_annotation = None
-            
-            self.annotations_changed.emit()
+            self._clear_all_annotations_internal()
+    
+    def _clear_all_annotations_internal(self):
+        """Internal method to clear all annotations without prompting."""
+        # Remove all visual regions
+        for annotation in list(self.annotations):
+            if annotation in self.annotation_regions:
+                for plot_widget, region in self.annotation_regions[annotation]:
+                    try:
+                        plot_widget.removeItem(region)
+                    except:
+                        pass
+        
+        # Clear storage
+        self.annotations.clear()
+        self.annotation_regions.clear()
+        self.selected_annotation = None
+        
+        self.annotations_changed.emit()
     
     def keyPressEvent(self, event):
         """Handle key press events for annotation operations."""

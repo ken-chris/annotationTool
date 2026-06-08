@@ -692,7 +692,7 @@ class TimeSeriesWidget(QWidget):
             status_bar.showMessage(f"Deleted annotation '{annotation.label}'", 3000)
     
     def clear_all_annotations(self):
-        """Clear all annotations."""
+        """Clear all annotations with user confirmation."""
         if not self.annotations:
             QMessageBox.information(self, "No Annotations", "No annotations to clear.")
             return
@@ -705,28 +705,32 @@ class TimeSeriesWidget(QWidget):
         )
         
         if reply == QMessageBox.StandardButton.Yes:
-            # Remove all visual regions from plots
-            for annotation in list(self.annotations):
-                if annotation in self.annotation_regions:
-                    regions_to_remove = self.annotation_regions[annotation]
-                    for i, plot_widget in enumerate(self.plot_widgets):
-                        if i < len(regions_to_remove):
-                            region = regions_to_remove[i]
-                            plot_widget.removeItem(region)
-            
-            # Clear storage
-            self.annotations.clear()
-            self.annotation_regions.clear()
-            self.selected_annotation = None
-            
-            # Emit signal
-            self.annotation_selected.emit(None)
-            self.annotations_changed.emit()
-            
-            # Update status bar
-            status_bar = self.statusBar()
-            if status_bar:
-                status_bar.showMessage("All annotations cleared", 3000)
+            self._clear_all_annotations_internal()
+    
+    def _clear_all_annotations_internal(self):
+        """Internal method to clear all annotations without prompting."""
+        # Remove all visual regions from plots
+        for annotation in list(self.annotations):
+            if annotation in self.annotation_regions:
+                regions_to_remove = self.annotation_regions[annotation]
+                for i, plot_widget in enumerate(self.plot_widgets):
+                    if i < len(regions_to_remove):
+                        region = regions_to_remove[i]
+                        plot_widget.removeItem(region)
+        
+        # Clear storage
+        self.annotations.clear()
+        self.annotation_regions.clear()
+        self.selected_annotation = None
+        
+        # Emit signal
+        self.annotation_selected.emit(None)
+        self.annotations_changed.emit()
+        
+        # Update status bar
+        status_bar = self.statusBar()
+        if status_bar:
+            status_bar.showMessage("All annotations cleared", 3000)
     
     def get_annotations(self):
         """
@@ -748,9 +752,13 @@ class TimeSeriesWidget(QWidget):
                 regions_to_update = self.annotation_regions[annotation]
                 start, end = normalize_region(annotation.start_time, annotation.end_time)
                 for region in regions_to_update:
-                    region.blockSignals(True)
-                    region.setRegion([start, end])
-                    region.blockSignals(False)
+                    try:
+                        region.blockSignals(True)
+                        region.setRegion([start, end])
+                        region.blockSignals(False)
+                    except RuntimeError:
+                        # Region has been deleted, skip it
+                        pass
     
     def load_annotations(self, annotations: List[Annotation]):
         """
@@ -759,8 +767,8 @@ class TimeSeriesWidget(QWidget):
         Args:
             annotations: List of Annotation objects
         """
-        # Clear existing
-        self.clear_all_annotations()
+        # Clear existing annotations without prompting (used for syncing)
+        self._clear_all_annotations_internal()
         
         # Add each annotation
         for annotation in annotations:

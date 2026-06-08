@@ -83,8 +83,9 @@ class ParameterPanel(QWidget):
         self.db_ref_spin.setMinimum(1e-12)
         self.db_ref_spin.setMaximum(1e6)
         self.db_ref_spin.setValue(1e-10)
-        self.db_ref_spin.setDecimals(12)
+        self.db_ref_spin.setDecimals(12)  # Allow up to 12 digits of precision for input
         self.db_ref_spin.setSingleStep(1e-11)
+        self.db_ref_spin.setMinimumWidth(150)  # Wider field to display more digits
         self.db_ref_spin.setToolTip("Reference value added to avoid log(0)")
         db_layout.addRow("Reference (ε):", self.db_ref_spin)
         

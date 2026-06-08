@@ -199,8 +199,9 @@ class MainWindow(QMainWindow):
         self.timeseries_widget.delete_selected_annotation()
     
     def clear_all_annotations(self):
-        """Clear all annotations."""
+        """Clear all annotations from both tabs."""
         self.timeseries_widget.clear_all_annotations()
+        self.spectrogram_widget.clear_all_annotations()
     
     def autoscale_y_axis(self):
         """Autoscale the Y-axis for all plots."""
@@ -221,7 +222,7 @@ class MainWindow(QMainWindow):
     def eventFilter(self, obj, event):
         """Global event filter to handle spacebar across entire application."""
         if event.type() == QEvent.Type.KeyPress:
-            if event.key() == Qt.Key.Space and not event.isAutoRepeat():
+            if event.key() == 32 and not event.isAutoRepeat():  # Key code 32 is spacebar
                 # Route to the current active widget
                 if self.tab_widget.currentIndex() == 0:  # Time Series tab
                     if self.timeseries_widget.is_playing:
@@ -493,12 +494,12 @@ class MainWindow(QMainWindow):
     
     def on_spectrogram_annotations_changed(self):
         """Handle annotation changes from spectrogram widget."""
-        # Get current annotations from spectrogram (they've been edited)
+        # Get current annotations from spectrogram (they've been edited or created)
         self.annotations = self.spectrogram_widget.annotations
         
-        # Update timeseries to reflect changes made on spectrogram
-        # This refreshes the visual regions in timeseries to match the edited data
-        self.timeseries_widget.refresh_annotation_regions()
+        # Update timeseries with the same annotations
+        # This will add new annotations created in spectrogram to timeseries
+        self.timeseries_widget.load_annotations(self.annotations)
         
         # Update status bar
         self.statusBar().showMessage(f"Total annotations: {len(self.annotations)}")
