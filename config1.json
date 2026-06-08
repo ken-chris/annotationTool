@@ -1,0 +1,44 @@
+{
+  "channel_names": [
+    "Earbud_Left",
+    "Digital_Stethoscope"
+  ],
+  "labels": [
+    {
+      "name": "Voice",
+      "color": [
+        255,
+        0,
+        0
+      ]
+    },
+    {
+      "name": "Other",
+      "color": [
+        170,
+        85,
+        255
+      ]
+    }
+  ],
+  "stft": {
+    "window_size": 512,
+    "overlap": 0.9,
+    "window_type": "hann",
+    "use_db": true,
+    "db_ref": 0.01,
+    "vmin": -80.0,
+    "vmax": -0.0
+  },
+  "fft": {
+    "nperseg": 256,
+    "window": "hann"
+  },
+  "ui": {
+    "plot_height_min": 200,
+    "plot_height_max": 250
+  },
+  "data": {
+    "default_sample_rate": 1000
+  }
+}

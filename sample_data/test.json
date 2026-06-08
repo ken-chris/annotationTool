@@ -1,0 +1,30 @@
+{
+  "sensor_file": "sample_sensor_data.npy",
+  "annotation_count": 2,
+  "annotations": [
+    {
+      "label": "Label1",
+      "start_time": 6.245078753591985,
+      "end_time": 7.94868687907384,
+      "duration": 1.7036081254818551,
+      "color": [
+        255,
+        0,
+        0
+      ],
+      "notes": ""
+    },
+    {
+      "label": "Label1",
+      "start_time": 3.009471134149535,
+      "end_time": 4.0094711341495355,
+      "duration": 1.0000000000000004,
+      "color": [
+        255,
+        0,
+        0
+      ],
+      "notes": ""
+    }
+  ]
+}

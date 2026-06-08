@@ -1,0 +1,19 @@
+# GUI Framework
+PyQt6>=6.6.0
+
+# High-performance plotting
+pyqtgraph>=0.13.3
+
+# Scientific computing
+numpy>=1.24.0
+scipy>=1.11.0
+pandas>=2.0.0
+
+# Audio playback
+sounddevice>=0.4.6
+
+# Optional: HDF5 support
+h5py>=3.9.0
+
+# Development/Packaging
+PyInstaller>=5.13.0

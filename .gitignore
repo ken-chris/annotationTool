@@ -1,0 +1,2 @@
+*.npy
+participant_data/*.json
