@@ -97,6 +97,9 @@ class TimeSeriesWidget(QWidget):
     # Signal emitted when the view range changes (pan/zoom)
     view_range_changed = pyqtSignal(float, float)  # x_min, x_max
     
+    # Signal emitted when playback finishes (thread-safe)
+    playback_finished = pyqtSignal()
+    
     def __init__(self, parent=None):
         super().__init__(parent)
         self.sensor_data: Optional[SensorData] = None
@@ -122,6 +125,9 @@ class TimeSeriesWidget(QWidget):
         self.is_updating_range = False
         
         self.init_ui()
+        
+        # Connect playback finished signal
+        self.playback_finished.connect(self.on_playback_finished)
     
     def init_ui(self):
         """Initialize the user interface."""
@@ -870,12 +876,8 @@ class TimeSeriesWidget(QWidget):
         except Exception as e:
             print(f"Playback error: {e}")
         finally:
-            # Reset button state - only update Qt objects from main thread
-            self.is_playing = False
-            self.play_button.setEnabled(True)
-            self.stop_button.setEnabled(False)
-            self.stop_button.setStyleSheet("")
-            # Don't access status bar from background thread - it causes crashes
+            # Emit signal to notify main thread - thread-safe
+            self.playback_finished.emit()
     
     def stop_playback(self):
         """Stop audio playback."""
@@ -890,6 +892,15 @@ class TimeSeriesWidget(QWidget):
             # as it may be called from background thread
         except Exception as e:
             print(f"Error stopping playback: {e}")
+    
+    def on_playback_finished(self):
+        """Handle playback finished signal from background thread (runs on main thread)."""
+        self.is_playing = False
+        if self.play_button:
+            self.play_button.setEnabled(True)
+        if self.stop_button:
+            self.stop_button.setEnabled(False)
+            self.stop_button.setStyleSheet("")
     
     def statusBar(self):
         """Helper to get status bar from main window."""

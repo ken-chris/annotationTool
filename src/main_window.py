@@ -179,6 +179,11 @@ class MainWindow(QMainWindow):
         autoscale_y_action.triggered.connect(self.autoscale_y_axis)
         view_menu.addAction(autoscale_y_action)
         
+        home_selection_action = QAction("&Home Selection", self)
+        home_selection_action.setShortcut(QKeySequence("Ctrl+H"))
+        home_selection_action.triggered.connect(self.home_selection)
+        view_menu.addAction(home_selection_action)
+        
         # Help menu
         help_menu = menubar.addMenu("&Help")
         
@@ -201,6 +206,14 @@ class MainWindow(QMainWindow):
         
         # Autoscale spectrogram Y-axis (frequency axis)
         self.spectrogram_widget.autoscale_y_axis()
+    
+    def home_selection(self):
+        """Move selection to home position (10%-30% of visible segment)."""
+        # Get the currently active tab
+        if self.tab_widget.currentIndex() == 0:  # Time Series tab
+            self.timeseries_widget.home_selection()
+        elif self.tab_widget.currentIndex() == 1:  # Spectrogram tab
+            self.spectrogram_widget.home_selection()
     
     def open_file(self):
         """Open a data file dialog."""
@@ -501,7 +514,15 @@ class MainWindow(QMainWindow):
         
         # Update spectrogram with new parameters
         if self.sensor_data:
-            self.on_stft_params_changed()
+            self.on_stft_parameters_changed(
+                self.config.stft.window_size,
+                self.config.stft.overlap,
+                self.config.stft.window_type,
+                self.config.stft.use_db,
+                self.config.stft.db_ref,
+                self.config.stft.vmin,
+                self.config.stft.vmax
+            )
     
     def load_config_file(self):
         """Load configuration from JSON file."""
@@ -516,6 +537,13 @@ class MainWindow(QMainWindow):
             try:
                 import json
                 self.config = AppConfig.load(filename)
+                
+                # If data is already loaded, apply the channel names from the new config
+                if self.sensor_data and self.config.channel_names:
+                    self.sensor_data.apply_channel_names_from_config(self.config.channel_names)
+                    # Update parameter panel with new channel names
+                    self.parameter_panel.update_channel_list(self.sensor_data.channel_names)
+                
                 self.apply_config()
                 self.statusBar().showMessage(f"Configuration loaded from {filename}", 3000)
                 QMessageBox.information(

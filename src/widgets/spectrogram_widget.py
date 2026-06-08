@@ -27,6 +27,8 @@ class SpectrogramWidget(QWidget):
     annotations_changed = pyqtSignal()
     # Signal emitted when the blue region changes
     region_changed = pyqtSignal(float, float)  # start, end
+    # Signal emitted when playback finishes (thread-safe)
+    playback_finished = pyqtSignal()
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -65,6 +67,9 @@ class SpectrogramWidget(QWidget):
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         
         self.init_ui()
+        
+        # Connect playback finished signal
+        self.playback_finished.connect(self.on_playback_finished)
     
     def init_ui(self):
         """Initialize the user interface."""
@@ -594,12 +599,8 @@ class SpectrogramWidget(QWidget):
         except Exception as e:
             print(f"Playback error: {e}")
         finally:
-            # Reset button state - only update Qt objects from main thread
-            self.is_playing = False
-            self.play_button.setEnabled(True)
-            self.stop_button.setEnabled(False)
-            self.stop_button.setStyleSheet("")
-            # Don't access status bar from background thread - it causes crashes
+            # Emit signal to notify main thread - thread-safe
+            self.playback_finished.emit()
     
     def stop_playback(self):
         """Stop audio playback."""
@@ -614,6 +615,15 @@ class SpectrogramWidget(QWidget):
             # as it may be called from background thread
         except Exception as e:
             print(f"Error stopping playback: {e}")
+    
+    def on_playback_finished(self):
+        """Handle playback finished signal from background thread (runs on main thread)."""
+        self.is_playing = False
+        if self.play_button:
+            self.play_button.setEnabled(True)
+        if self.stop_button:
+            self.stop_button.setEnabled(False)
+            self.stop_button.setStyleSheet("")
     
     def statusBar(self):
         """Helper to get status bar from main window."""
