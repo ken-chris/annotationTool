@@ -124,6 +124,9 @@ class TimeSeriesWidget(QWidget):
         # Flag to prevent signal recursion
         self.is_updating_range = False
         
+        # Enable strong focus to receive key events
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        
         self.init_ui()
         
         # Connect playback finished signal
@@ -901,6 +904,17 @@ class TimeSeriesWidget(QWidget):
         if self.stop_button:
             self.stop_button.setEnabled(False)
             self.stop_button.setStyleSheet("")
+    
+    def keyPressEvent(self, event):
+        """Handle key press events (spacebar for playback toggle)."""
+        if event.key() == Qt.Key_Space and not event.isAutoRepeat():
+            event.accept()
+            if self.is_playing:
+                self.stop_playback()
+            else:
+                self.play_selected_segment()
+        else:
+            super().keyPressEvent(event)
     
     def statusBar(self):
         """Helper to get status bar from main window."""

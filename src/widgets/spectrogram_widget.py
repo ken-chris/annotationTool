@@ -625,6 +625,17 @@ class SpectrogramWidget(QWidget):
             self.stop_button.setEnabled(False)
             self.stop_button.setStyleSheet("")
     
+    def keyPressEvent(self, event):
+        """Handle key press events (spacebar for playback toggle)."""
+        if event.key() == Qt.Key_Space and not event.isAutoRepeat():
+            event.accept()
+            if self.is_playing:
+                self.stop_playback()
+            else:
+                self.play_selected_segment()
+        else:
+            super().keyPressEvent(event)
+    
     def statusBar(self):
         """Helper to get status bar from main window."""
         window = self.window()
