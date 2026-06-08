@@ -1,2 +1,3 @@
 *.npy
 participant_data/*.json
+participant_data/

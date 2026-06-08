@@ -166,6 +166,13 @@ class TimeSeriesWidget(QWidget):
         apply_btn.clicked.connect(self.update_region_from_inputs)
         controls_layout.addWidget(apply_btn)
         
+        # Home selection button
+        home_selection_btn = QPushButton("Home Selection")
+        home_selection_btn.clicked.connect(self.home_selection)
+        home_selection_btn.setToolTip("Move selection to 10%-30% of currently visible segment")
+        home_selection_btn.setMaximumWidth(140)
+        controls_layout.addWidget(home_selection_btn)
+        
         # Channel selection dropdown for playback
         controls_layout.addWidget(QLabel("Play Channel:"))
         self.channel_combo = QComboBox()
@@ -253,6 +260,9 @@ class TimeSeriesWidget(QWidget):
                 brush=pg.mkBrush(100, 100, 200, 50),
                 movable=True
             )
+            
+            # Set higher z-value so it's drawn on top of annotations
+            region_item.setZValue(1000)
             
             # Connect to sync function
             region_item.sigRegionChanged.connect(
@@ -396,6 +406,28 @@ class TimeSeriesWidget(QWidget):
         except ValueError:
             # Invalid input, reset to current region
             self.update_inputs_from_region()
+    
+    def home_selection(self):
+        """Move the blue selection to 10%-30% of the currently visible segment."""
+        if not self.plot_widgets or not self.region_items:
+            return
+        
+        # Get the current visible x-axis range from the first plot
+        view_box = self.plot_widgets[0].getViewBox()
+        x_range = view_box.viewRange()[0]  # Returns [xmin, xmax]
+        x_min, x_max = x_range[0], x_range[1]
+        
+        # Calculate segment size and position from 10%-30% of the visible segment
+        segment_size = x_max - x_min
+        start = x_min + segment_size * 0.1
+        end = x_min + segment_size * 0.3
+        
+        # Update all regions
+        for region_item in self.region_items:
+            region_item.setRegion([start, end])
+        
+        # Update input fields
+        self.update_inputs_from_region()
     
     def get_selected_region(self):
         """
@@ -722,18 +754,47 @@ class TimeSeriesWidget(QWidget):
         self.annotations_changed.emit()
     
     def autoscale_y_axis(self):
-        """Autoscale the Y-axis for all plots to fit the current data (preserves X-axis range)."""
-        for plot_widget in self.plot_widgets:
+        """Autoscale the Y-axis to fit visible data with 5% padding (preserves X-axis range)."""
+        for i, plot_widget in enumerate(self.plot_widgets):
             view_box = plot_widget.getViewBox()
-            if view_box:
-                # Save current X-axis range to restore after autoRange
+            if view_box and i < len(self.plot_items):
+                # Get current X-axis range (visible segment)
                 x_range = view_box.viewRange()[0]
+                x_min, x_max = x_range[0], x_range[1]
                 
-                # Autorange all axes to calculate proper Y range
-                view_box.autoRange(padding=0.02)
+                # Get the plot data item
+                plot_item = self.plot_items[i]
+                x_data, y_data = plot_item.getData()
                 
-                # Restore the X-axis range to keep zoom/pan unchanged
-                view_box.setXRange(x_range[0], x_range[1], padding=0)
+                if x_data is not None and y_data is not None and len(y_data) > 0:
+                    # Find indices that fall within visible X range
+                    mask = (x_data >= x_min) & (x_data <= x_max)
+                    visible_y_data = y_data[mask]
+                    
+                    if len(visible_y_data) > 0:
+                        # Calculate min and max with 5% padding
+                        y_min = np.min(visible_y_data)
+                        y_max = np.max(visible_y_data)
+                        
+                        # Apply 5% padding to expand range
+                        y_range = y_max - y_min
+                        if y_range > 0:
+                            y_min_scaled = y_min * 1.05
+                            y_max_scaled = y_max * 1.05
+                            # Ensure we have a reasonable range
+                            view_box.setYRange(y_min_scaled, y_max_scaled, padding=0)
+                        else:
+                            # If min and max are the same, add some padding
+                            view_box.setYRange(y_min - 1, y_max + 1, padding=0)
+                    else:
+                        # Fallback to autoRange if no data in visible range
+                        view_box.autoRange(padding=0.02)
+                else:
+                    # Fallback to autoRange if no data
+                    view_box.autoRange(padding=0.02)
+                
+                # Always preserve the X-axis range
+                view_box.setXRange(x_min, x_max, padding=0)
     
     def play_selected_segment(self):
         """Play the selected region segment as audio in a background thread."""

@@ -39,6 +39,9 @@ class SpectrogramWidget(QWidget):
         self.annotations: List[Annotation] = []
         self.annotation_regions: Dict[Annotation, List[tuple]] = {}  # List of (plot_widget, region_item) tuples
         self.region_items: List[tuple] = []  # List of (plot_widget, region_item) tuples
+        self.selected_annotation: Optional[Annotation] = None
+        self.active_label: str = "Label1"
+        self.active_color: tuple = (255, 0, 0)
         
         # Audio playback state
         self.is_playing: bool = False
@@ -57,6 +60,9 @@ class SpectrogramWidget(QWidget):
         
         # Flag to prevent signal recursion
         self.is_updating_range = False
+        
+        # Set focus policy so this widget can receive key events
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         
         self.init_ui()
     
@@ -90,7 +96,29 @@ class SpectrogramWidget(QWidget):
         self.stop_button.setEnabled(False)  # Disabled until playback starts
         controls_layout.addWidget(self.stop_button)
         
+        # Home selection button
+        home_selection_btn = QPushButton("Home Selection")
+        home_selection_btn.clicked.connect(self.home_selection)
+        home_selection_btn.setToolTip("Move selection to 10%-30% of currently visible segment")
+        home_selection_btn.setMaximumWidth(140)
+        controls_layout.addWidget(home_selection_btn)
+        
         controls_layout.addStretch()
+        
+        # Annotation controls
+        create_annotation_btn = QPushButton("Create Annotation from Region")
+        create_annotation_btn.clicked.connect(self.create_annotation_from_region)
+        controls_layout.addWidget(create_annotation_btn)
+        
+        delete_selected_btn = QPushButton("Delete Selected Annotation")
+        delete_selected_btn.clicked.connect(self.delete_selected_annotation)
+        delete_selected_btn.setToolTip("Click an annotation to select it, then click this button to delete")
+        controls_layout.addWidget(delete_selected_btn)
+        
+        clear_annotations_btn = QPushButton("Clear All Annotations")
+        clear_annotations_btn.clicked.connect(self.clear_all_annotations)
+        controls_layout.addWidget(clear_annotations_btn)
+        
         main_layout.addLayout(controls_layout)
         
         # Create scroll area for plots
@@ -223,6 +251,28 @@ class SpectrogramWidget(QWidget):
         
         # Emit signal with the new range
         self.view_range_changed.emit(x_range[0], x_range[1])
+    
+    def home_selection(self):
+        """Move the blue selection to 10%-30% of the currently visible segment."""
+        if not self.region_items:
+            return
+        
+        # Get the current visible x-axis range from the first plot
+        if not self.plot_widgets:
+            return
+        
+        view_box = self.plot_widgets[0].getViewBox()
+        x_range = view_box.viewRange()[0]  # Returns [xmin, xmax]
+        x_min, x_max = x_range[0], x_range[1]
+        
+        # Calculate segment size and position from 10%-30% of the visible segment
+        segment_size = x_max - x_min
+        start = x_min + segment_size * 0.1
+        end = x_min + segment_size * 0.3
+        
+        # Update all regions
+        for plot_widget, region_item in self.region_items:
+            region_item.setRegion([start, end])
     
     def clear_plots(self):
         """Clear all existing plots."""
@@ -412,6 +462,9 @@ class SpectrogramWidget(QWidget):
                 pen=pg.mkPen(color=(100, 100, 200), width=2),
                 movable=True
             )
+            # Set higher z-value so it's drawn on top of annotations
+            region.setZValue(1000)
+            
             # Connect to region change events
             region.sigRegionChanged.connect(self.on_region_changed_internal)
             
@@ -629,15 +682,158 @@ class SpectrogramWidget(QWidget):
         self.region_changed.emit(start, end)
     
     def autoscale_y_axis(self):
-        """Autoscale the Y-axis (frequency axis) for all spectrogram plots (preserves X-axis range)."""
-        for plot_widget in self.plot_widgets:
+        """Autoscale the Y-axis (frequency axis) to fit visible data with 5% padding (preserves X-axis range)."""
+        for i, plot_widget in enumerate(self.plot_widgets):
             view_box = plot_widget.getViewBox()
-            if view_box:
-                # Save current X-axis range to restore after autoRange
+            if view_box and i < len(self.image_items):
+                # Get current X-axis range (visible time segment)
                 x_range = view_box.viewRange()[0]
+                x_min, x_max = x_range[0], x_range[1]
                 
-                # Autorange all axes to calculate proper Y range
+                # For spectrogram, we just want to fit the frequency axis to the data
+                # The frequency axis should show the full frequency range of the STFT
+                # So we'll use autoRange for Y but preserve X
+                y_range_before = view_box.viewRange()[1]
+                
+                # Autorange to get the proper frequency axis fit
                 view_box.autoRange(padding=0.02)
                 
-                # Restore the X-axis range to keep zoom/pan unchanged
-                view_box.setXRange(x_range[0], x_range[1], padding=0)
+                # Get the autoranged Y values
+                y_range = view_box.viewRange()[1]
+                y_min, y_max = y_range[0], y_range[1]
+                
+                # Apply 5% padding to expand the Y-axis range
+                y_center = (y_min + y_max) / 2
+                y_range_size = y_max - y_min
+                y_min_scaled = y_center - (y_range_size / 2) * 1.05
+                y_max_scaled = y_center + (y_range_size / 2) * 1.05                
+                view_box.setYRange(y_min_scaled, y_max_scaled, padding=0)
+                
+                # Always preserve the X-axis range
+                view_box.setXRange(x_min, x_max, padding=0)
+    
+    def set_active_label(self, label: str, color: tuple):
+        """Set the active annotation label and color."""
+        self.active_label = label
+        self.active_color = color
+    
+    def create_annotation_from_region(self):
+        """Create an annotation from the current region."""
+        if not self.region_items:
+            return
+        
+        # Get region bounds from first region item (tuple of plot_widget, region)
+        plot_widget, region = self.region_items[0]
+        start, end = region.getRegion()
+        
+        from src.models.annotation import Annotation
+        annotation = Annotation(
+            label=self.active_label,
+            start_time=start,
+            end_time=end,
+            color=self.active_color
+        )
+        
+        # Add to list and display
+        self.annotations.append(annotation)
+        
+        # Display on all plots
+        regions = []
+        color_rgb = annotation.color if isinstance(annotation.color, tuple) else (255, 0, 0)
+        
+        for plot_widget in self.plot_widgets:
+            region_item = pg.LinearRegionItem(
+                values=[annotation.start_time, annotation.end_time],
+                brush=pg.mkBrush(color_rgb[0], color_rgb[1], color_rgb[2], 30),
+                pen=pg.mkPen(color=color_rgb, width=2),
+                movable=True
+            )
+            
+            region_item.sigRegionChanged.connect(
+                lambda rgn=region_item, ann=annotation: self.on_annotation_region_changed(ann, rgn)
+            )
+            region_item.sigRegionChangeFinished.connect(
+                lambda rgn=region_item, ann=annotation: self.on_annotation_region_change_finished(ann, rgn)
+            )
+            
+            # Connect click to select
+            if hasattr(region_item, 'clicked'):
+                region_item.clicked.connect(
+                    lambda ann=annotation: self.select_annotation(ann)
+                )
+            
+            plot_widget.addItem(region_item)
+            regions.append((plot_widget, region_item))
+        
+        self.annotation_regions[annotation] = regions
+        self.annotations_changed.emit()
+    
+    def select_annotation(self, annotation: Annotation):
+        """Select or deselect an annotation."""
+        if self.selected_annotation == annotation:
+            self.selected_annotation = None
+        else:
+            self.selected_annotation = annotation
+    
+    def delete_selected_annotation(self):
+        """Delete the currently selected annotation."""
+        if self.selected_annotation is None:
+            return
+        
+        annotation = self.selected_annotation
+        
+        # Remove visual regions
+        if annotation in self.annotation_regions:
+            for plot_widget, region in self.annotation_regions[annotation]:
+                try:
+                    plot_widget.removeItem(region)
+                except:
+                    pass
+            del self.annotation_regions[annotation]
+        
+        # Remove from list
+        if annotation in self.annotations:
+            self.annotations.remove(annotation)
+        
+        self.selected_annotation = None
+        self.annotations_changed.emit()
+    
+    def clear_all_annotations(self):
+        """Clear all annotations."""
+        if not self.annotations:
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.information(self, "No Annotations", "No annotations to clear.")
+            return
+        
+        from PyQt6.QtWidgets import QMessageBox
+        reply = QMessageBox.question(
+            self,
+            "Clear All Annotations",
+            f"Delete all {len(self.annotations)} annotations?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        
+        if reply == QMessageBox.StandardButton.Yes:
+            # Remove all visual regions
+            for annotation in list(self.annotations):
+                if annotation in self.annotation_regions:
+                    for plot_widget, region in self.annotation_regions[annotation]:
+                        try:
+                            plot_widget.removeItem(region)
+                        except:
+                            pass
+            
+            # Clear storage
+            self.annotations.clear()
+            self.annotation_regions.clear()
+            self.selected_annotation = None
+            
+            self.annotations_changed.emit()
+    
+    def keyPressEvent(self, event):
+        """Handle key press events for annotation operations."""
+        if event.key() == Qt.Key.Key_Delete:
+            self.delete_selected_annotation()
+            event.accept()
+        else:
+            super().keyPressEvent(event)
