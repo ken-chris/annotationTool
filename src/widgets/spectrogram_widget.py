@@ -7,12 +7,17 @@ from PyQt6.QtWidgets import (
     QPushButton, QComboBox, QMessageBox
 )
 from PyQt6.QtCore import Qt, pyqtSignal
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Tuple
 import numpy as np
 import threading
 from src.models.sensor_data import SensorData
 from src.models.annotation import Annotation
 from src.utils.signal_processing import compute_stft
+
+
+def normalize_region(start: float, end: float) -> Tuple[float, float]:
+    """Ensure start <= end for region setting."""
+    return (min(start, end), max(start, end))
 
 
 class SpectrogramWidget(QWidget):
@@ -277,7 +282,7 @@ class SpectrogramWidget(QWidget):
         
         # Update all regions
         for plot_widget, region_item in self.region_items:
-            region_item.setRegion([start, end])
+            region_item.setRegion(list(normalize_region(start, end)))
     
     def clear_plots(self):
         """Clear all existing plots."""
@@ -603,16 +608,11 @@ class SpectrogramWidget(QWidget):
             self.playback_finished.emit()
     
     def stop_playback(self):
-        """Stop audio playback."""
+        """Stop audio playback (thread-safe - only calls sounddevice.stop())."""
         try:
             import sounddevice as sd
             sd.stop()
-            self.is_playing = False
-            self.play_button.setEnabled(True)
-            self.stop_button.setEnabled(False)
-            self.stop_button.setStyleSheet("")
-            # Note: Don't try to update status bar from stop_playback
-            # as it may be called from background thread
+            # Don't modify UI here - let playback_finished signal handle it
         except Exception as e:
             print(f"Error stopping playback: {e}")
     
@@ -626,16 +626,8 @@ class SpectrogramWidget(QWidget):
             self.stop_button.setStyleSheet("")
     
     def keyPressEvent(self, event):
-        """Handle key press events (spacebar for playback toggle)."""
-        # Spacebar key code is 32
-        if event.key() == 32 and not event.isAutoRepeat():
-            event.accept()
-            if self.is_playing:
-                self.stop_playback()
-            else:
-                self.play_selected_segment()
-        else:
-            super().keyPressEvent(event)
+        """Handle key press events - pass to parent for global hotkey handling."""
+        super().keyPressEvent(event)
     
     def statusBar(self):
         """Helper to get status bar from main window."""
@@ -653,6 +645,7 @@ class SpectrogramWidget(QWidget):
             region: The LinearRegionItem that was changed
         """
         start, end = region.getRegion()
+        start, end = normalize_region(start, end)
         
         # Update annotation data
         annotation.start_time = start
@@ -692,6 +685,7 @@ class SpectrogramWidget(QWidget):
             region: The LinearRegionItem that was changed
         """
         start, end = region.getRegion()
+        start, end = normalize_region(start, end)
         
         # Sync all regions (block signals to prevent recursion)
         for plot_widget, other_region in self.region_items:

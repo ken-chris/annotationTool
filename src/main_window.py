@@ -5,7 +5,7 @@ from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
     QTabWidget, QFileDialog, QMessageBox, QStatusBar, QMenuBar
 )
-from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtCore import Qt, QTimer, QEvent
 from PyQt6.QtGui import QAction, QKeySequence
 from typing import Optional
 from src.models.sensor_data import SensorData
@@ -34,6 +34,9 @@ class MainWindow(QMainWindow):
         self.is_syncing_views = False
         
         self.init_ui()
+        
+        # Install event filter for global spacebar handling
+        self.installEventFilter(self)
         
     def init_ui(self):
         """Initialize the user interface."""
@@ -214,6 +217,25 @@ class MainWindow(QMainWindow):
             self.timeseries_widget.home_selection()
         elif self.tab_widget.currentIndex() == 1:  # Spectrogram tab
             self.spectrogram_widget.home_selection()
+    
+    def eventFilter(self, obj, event):
+        """Global event filter to handle spacebar across entire application."""
+        if event.type() == QEvent.Type.KeyPress:
+            if event.key() == Qt.Key.Space and not event.isAutoRepeat():
+                # Route to the current active widget
+                if self.tab_widget.currentIndex() == 0:  # Time Series tab
+                    if self.timeseries_widget.is_playing:
+                        self.timeseries_widget.stop_playback()
+                    else:
+                        self.timeseries_widget.play_selected_segment()
+                    return True
+                elif self.tab_widget.currentIndex() == 1:  # Spectrogram tab
+                    if self.spectrogram_widget.is_playing:
+                        self.spectrogram_widget.stop_playback()
+                    else:
+                        self.spectrogram_widget.play_selected_segment()
+                    return True
+        return super().eventFilter(obj, event)
     
     def open_file(self):
         """Open a data file dialog."""

@@ -8,11 +8,16 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import pyqtSignal, Qt, QEvent, QDateTime, QThread
 from PyQt6.QtGui import QAction
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Tuple
 import numpy as np
 import threading
 from src.models.sensor_data import SensorData
 from src.models.annotation import Annotation
+
+
+def normalize_region(start: float, end: float) -> Tuple[float, float]:
+    """Ensure start <= end for region setting."""
+    return (min(start, end), max(start, end))
 
 
 class AnnotationRegion(pg.LinearRegionItem):
@@ -344,7 +349,7 @@ class TimeSeriesWidget(QWidget):
         
         # Set all regions to same position
         for region_item in self.region_items:
-            region_item.setRegion([start, end])
+            region_item.setRegion(list(normalize_region(start, end)))
         
         # Update input fields
         self.update_inputs_from_region()
@@ -365,7 +370,7 @@ class TimeSeriesWidget(QWidget):
         for region_item in self.region_items:
             if region_item != changed_item:
                 region_item.blockSignals(True)
-                region_item.setRegion([start, end])
+                region_item.setRegion(list(normalize_region(start, end)))
                 region_item.blockSignals(False)
         
         # Update input fields
@@ -405,8 +410,8 @@ class TimeSeriesWidget(QWidget):
             start = float(self.start_edit.text())
             end = float(self.end_edit.text())
             
-            if start >= end:
-                return
+            # Normalize so start <= end
+            start, end = normalize_region(start, end)
             
             # Update all regions
             for region_item in self.region_items:
@@ -433,7 +438,7 @@ class TimeSeriesWidget(QWidget):
         
         # Update all regions
         for region_item in self.region_items:
-            region_item.setRegion([start, end])
+            region_item.setRegion(list(normalize_region(start, end)))
         
         # Update input fields
         self.update_inputs_from_region()
@@ -562,6 +567,7 @@ class TimeSeriesWidget(QWidget):
             region: The LinearRegionItem that was changed
         """
         start, end = region.getRegion()
+        start, end = normalize_region(start, end)
         
         # Update annotation data
         annotation.start_time = start
@@ -740,9 +746,10 @@ class TimeSeriesWidget(QWidget):
             if annotation in self.annotation_regions:
                 # Update all region items for this annotation to match its current times
                 regions_to_update = self.annotation_regions[annotation]
+                start, end = normalize_region(annotation.start_time, annotation.end_time)
                 for region in regions_to_update:
                     region.blockSignals(True)
-                    region.setRegion([annotation.start_time, annotation.end_time])
+                    region.setRegion([start, end])
                     region.blockSignals(False)
     
     def load_annotations(self, annotations: List[Annotation]):
@@ -883,16 +890,11 @@ class TimeSeriesWidget(QWidget):
             self.playback_finished.emit()
     
     def stop_playback(self):
-        """Stop audio playback."""
+        """Stop audio playback (thread-safe - only calls sounddevice.stop())."""
         try:
             import sounddevice as sd
             sd.stop()
-            self.is_playing = False
-            self.play_button.setEnabled(True)
-            self.stop_button.setEnabled(False)
-            self.stop_button.setStyleSheet("")
-            # Note: Don't try to update status bar from stop_playback
-            # as it may be called from background thread
+            # Don't modify UI here - let playback_finished signal handle it
         except Exception as e:
             print(f"Error stopping playback: {e}")
     
@@ -906,16 +908,8 @@ class TimeSeriesWidget(QWidget):
             self.stop_button.setStyleSheet("")
     
     def keyPressEvent(self, event):
-        """Handle key press events (spacebar for playback toggle)."""
-        # Spacebar key code is 32
-        if event.key() == 32 and not event.isAutoRepeat():
-            event.accept()
-            if self.is_playing:
-                self.stop_playback()
-            else:
-                self.play_selected_segment()
-        else:
-            super().keyPressEvent(event)
+        """Handle key press events - pass to parent for global hotkey handling."""
+        super().keyPressEvent(event)
     
     def statusBar(self):
         """Helper to get status bar from main window."""
