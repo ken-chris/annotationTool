@@ -3,7 +3,8 @@ Main application window.
 """
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
-    QTabWidget, QFileDialog, QMessageBox, QStatusBar, QMenuBar
+    QTabWidget, QFileDialog, QMessageBox, QStatusBar, QMenuBar,
+    QGroupBox, QLabel
 )
 from PyQt6.QtCore import Qt, QTimer, QEvent
 from PyQt6.QtGui import QAction, QKeySequence
@@ -33,6 +34,16 @@ class MainWindow(QMainWindow):
         # Flag to prevent view sync recursion
         self.is_syncing_views = False
         
+        # Shared playback state (only one tab can play at a time)
+        # This prevents race conditions when stopping playback from a different tab
+        import threading
+        self.playback_lock = threading.Lock()
+        self.playback_thread_finished = threading.Event()
+        self.playback_thread_finished.set()  # Initially set (no playback)
+        self.is_playing = False
+        self.stop_in_progress = False
+        self.active_playback_widget = None  # Track which widget is currently playing
+        
         self.init_ui()
         
         # Install event filter for global spacebar handling
@@ -61,6 +72,16 @@ class MainWindow(QMainWindow):
         # Left panel (control panels)
         left_panel = QWidget()
         left_layout = QVBoxLayout(left_panel)
+        
+        # File info display
+        file_info_group = QGroupBox("Loaded Data")
+        file_info_layout = QVBoxLayout(file_info_group)
+        self.file_info_label = QLabel("No data loaded")
+        self.file_info_label.setStyleSheet("color: #666; font-style: italic;")
+        self.file_info_label.setWordWrap(True)
+        file_info_layout.addWidget(self.file_info_label)
+        file_info_group.setMaximumHeight(80)
+        left_layout.addWidget(file_info_group)
         
         # Create annotation panel
         self.annotation_panel = AnnotationPanel()
@@ -190,6 +211,12 @@ class MainWindow(QMainWindow):
         # Help menu
         help_menu = menubar.addMenu("&Help")
         
+        feature_ref_action = QAction("&Feature Reference", self)
+        feature_ref_action.triggered.connect(self.show_feature_reference)
+        help_menu.addAction(feature_ref_action)
+        
+        help_menu.addSeparator()
+        
         about_action = QAction("&About", self)
         about_action.triggered.connect(self.show_about)
         help_menu.addAction(about_action)
@@ -315,6 +342,19 @@ class MainWindow(QMainWindow):
             if self.config.channel_names:
                 self.sensor_data.apply_channel_names_from_config(self.config.channel_names)
             
+            # Update file info display in left panel
+            import os
+            file_name = os.path.basename(self.sensor_data.filename)
+            file_info = (
+                f"<b>{file_name}</b><br>"
+                f"Samples: {self.sensor_data.n_samples:,}<br>"
+                f"Channels: {self.sensor_data.n_channels}<br>"
+                f"Duration: {self.sensor_data.duration:.2f}s<br>"
+                f"Sample Rate: {self.sensor_data.sample_rate:.1f} Hz"
+            )
+            self.file_info_label.setText(file_info)
+            self.file_info_label.setStyleSheet("")  # Remove italic style when data is loaded
+            
             # Update status bar with file info
             info_msg = (f"Loaded: {self.sensor_data.filename} | "
                        f"{self.sensor_data.n_samples:,} samples | "
@@ -418,6 +458,42 @@ class MainWindow(QMainWindow):
             "<p>Built with PyQt6 and PyQtGraph</p>"
         )
     
+    def show_feature_reference(self):
+        """Show feature reference dialog with keyboard shortcuts."""
+        QMessageBox.information(
+            self,
+            "Feature Reference - Keyboard Shortcuts",
+            "<h3>Keyboard Shortcuts & Features</h3>"
+            "<p><b>Playback Control:</b></p>"
+            "<ul>"
+            "<li><b>Spacebar</b> - Toggle playback start/stop for selected segment</li>"
+            "</ul>"
+            "<p><b>View & Display:</b></p>"
+            "<ul>"
+            "<li><b>Ctrl+Y</b> - Autoscale Y-axis to fit visible data (with 5% padding)</li>"
+            "<li><b>Ctrl+H</b> - Home Selection - Move selection to 10%-30% of visible segment</li>"
+            "</ul>"
+            "<p><b>Annotation Management:</b></p>"
+            "<ul>"
+            "<li><b>Delete</b> - Delete selected annotation</li>"
+            "<li><b>Ctrl+Shift+D</b> - Clear all annotations (with confirmation)</li>"
+            "</ul>"
+            "<p><b>File Operations:</b></p>"
+            "<ul>"
+            "<li><b>Ctrl+O</b> - Open sensor data file</li>"
+            "<li><b>Ctrl+S</b> - Save annotations</li>"
+            "<li><b>Ctrl+L</b> - Load annotations from file</li>"
+            "<li><b>Ctrl+E</b> - Export annotations to CSV/JSON</li>"
+            "<li><b>Ctrl+Shift+O</b> - Load configuration file</li>"
+            "<li><b>Ctrl+Shift+S</b> - Save configuration file</li>"
+            "</ul>"
+            "<p><b>Notes:</b></p>"
+            "<ul>"
+            "<li>Annotations created in either tab (Time Series or Spectrogram) are automatically synced</li>"
+            "<li>All keyboard shortcuts work in both Time Series and Spectrogram tabs</li>"
+            "</ul>"
+        )
+    
     def on_region_changed(self, start_time: float, end_time: float):
         """Handle region selection change in time series widget."""
         # Update FFT with selected region (all channels)
@@ -516,6 +592,28 @@ class MainWindow(QMainWindow):
                 
                 # Update input fields
                 self.timeseries_widget.update_inputs_from_region()
+    
+    def start_playback(self, widget):
+        """
+        Start playback in the given widget.
+        Ensures only one tab can play at a time (prevents sounddevice conflicts).
+        """
+        # If another tab is playing, stop it first
+        if self.is_playing and self.active_playback_widget != widget:
+            print(f"[DEBUG] Stopping playback in {self.active_playback_widget.__class__.__name__} before starting in {widget.__class__.__name__}")
+            self.active_playback_widget.stop_playback()
+        
+        # Now start playback in the requested widget
+        self.active_playback_widget = widget
+        return True
+    
+    def stop_playback_global(self):
+        """
+        Stop playback in the active widget (called globally).
+        Coordinates across tabs to prevent race conditions.
+        """
+        if self.is_playing and self.active_playback_widget:
+            self.active_playback_widget.stop_playback()
     
     def apply_config(self):
         """Apply current configuration to all widgets."""

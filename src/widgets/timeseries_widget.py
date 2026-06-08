@@ -125,6 +125,12 @@ class TimeSeriesWidget(QWidget):
         self.play_button: Optional[QPushButton] = None
         self.stop_button: Optional[QPushButton] = None
         self.channel_combo: Optional[QComboBox] = None
+        self.stop_in_progress: bool = False  # Flag to prevent concurrent stop calls
+        
+        # Threading control for playback (fix issue 4: wait for thread completion)
+        self.playback_lock = threading.Lock()  # Serialize playback operations
+        self.playback_thread_finished = threading.Event()  # Signal when thread completes
+        self.playback_thread_finished.set()  # Initially set (no thread running)
         
         # Flag to prevent signal recursion
         self.is_updating_range = False
@@ -827,46 +833,81 @@ class TimeSeriesWidget(QWidget):
             return
         
         try:
-            # Get selected region
-            start, end = self.region_items[0].getRegion()
-            
-            # Get data for selected region
-            timestamps, data = self.sensor_data.get_time_slice(start, end)
-            
-            if len(data) == 0:
-                QMessageBox.warning(self, "Empty Region", "Please select a valid region to play.")
+            # Get reference to main window for shared playback state
+            main_window = self.window()
+            if not hasattr(main_window, 'playback_lock'):
+                # Fallback if main window doesn't have shared state (shouldn't happen)
+                QMessageBox.warning(self, "Error", "Main window not properly initialized")
                 return
             
-            # Get selected channel from dropdown
-            channel_idx = self.channel_combo.currentData() if self.channel_combo else 0
+            # Coordinate through main window (stop other tab's playback if needed)
+            main_window.start_playback(self)
             
-            # Use selected channel for playback
-            audio_data = data[:, channel_idx]
+            # Wait for previous playback to complete
+            if not main_window.playback_thread_finished.wait(timeout=1.0):
+                QMessageBox.warning(self, "Playback Busy", "Previous playback still finishing. Try again.")
+                return
             
-            # Normalize audio to [-1, 1] range to prevent clipping
-            max_val = np.max(np.abs(audio_data))
-            if max_val > 0:
-                audio_data = audio_data / max_val
-            
-            # Mark as playing and update buttons
-            self.is_playing = True
-            self.play_button.setEnabled(False)
-            self.stop_button.setEnabled(True)
-            self.stop_button.setStyleSheet("background-color: #ffcccc;")
-            
-            # Update status bar
-            status_bar = self.statusBar()
-            if status_bar:
-                duration = len(audio_data) / self.sensor_data.sample_rate
-                status_bar.showMessage(f"Playing segment ({duration:.2f}s)...")
-            
-            # Start playback in background thread to keep UI responsive
-            playback_thread = threading.Thread(
-                target=self._play_audio_in_thread,
-                args=(audio_data, self.sensor_data.sample_rate),
-                daemon=True
-            )
-            playback_thread.start()
+            # Use shared lock to prevent concurrent sounddevice calls
+            with main_window.playback_lock:
+                # Check if playback is already running (another widget might have started it)
+                if main_window.is_playing:
+                    return
+                
+                # Get selected region
+                start, end = self.region_items[0].getRegion()
+                
+                # Get data for selected region
+                timestamps, data = self.sensor_data.get_time_slice(start, end)
+                
+                if len(data) == 0:
+                    QMessageBox.warning(self, "Empty Region", "Please select a valid region to play.")
+                    return
+                
+                # Get selected channel from dropdown
+                channel_idx = self.channel_combo.currentData() if self.channel_combo else 0
+                
+                # Use selected channel for playback
+                audio_data = data[:, channel_idx]
+                
+                # Normalize audio to [-1, 1] range to prevent clipping
+                max_val = np.max(np.abs(audio_data))
+                if max_val > 0:
+                    audio_data = audio_data / max_val
+                
+                # Set shared playback state IMMEDIATELY before thread start
+                main_window.is_playing = True
+                main_window.playback_thread_finished.clear()
+                self.is_playing = True  # Also set local flag for this widget
+                
+                # Add error checking for button access
+                try:
+                    if self.play_button:
+                        self.play_button.setEnabled(False)
+                    if self.stop_button:
+                        self.stop_button.setEnabled(True)
+                        self.stop_button.setStyleSheet("background-color: #ffcccc;")
+                except RuntimeError as e:
+                    print(f"Error updating buttons: {e}")
+                
+                # Update status bar
+                try:
+                    status_bar = self.statusBar()
+                    if status_bar:
+                        duration = len(audio_data) / self.sensor_data.sample_rate
+                        status_bar.showMessage(f"Playing segment ({duration:.2f}s)...")
+                except RuntimeError as e:
+                    print(f"Error updating status bar: {e}")
+                
+                print(f"[DEBUG] Starting playback thread in timeseries (is_playing={main_window.is_playing})")
+                
+                # Start playback in background thread to keep UI responsive
+                playback_thread = threading.Thread(
+                    target=self._play_audio_in_thread,
+                    args=(audio_data, self.sensor_data.sample_rate),
+                    daemon=True
+                )
+                playback_thread.start()
         
         except ImportError:
             QMessageBox.critical(
@@ -875,45 +916,88 @@ class TimeSeriesWidget(QWidget):
                 "Please install sounddevice:\npip install sounddevice"
             )
         except Exception as e:
+            print(f"[ERROR] Play segment error: {e}")
+            self.is_playing = False
+            main_window = self.window()
+            if hasattr(main_window, 'playback_thread_finished'):
+                main_window.is_playing = False
+                main_window.playback_thread_finished.set()
+            try:
+                if self.play_button:
+                    self.play_button.setEnabled(True)
+                if self.stop_button:
+                    self.stop_button.setEnabled(False)
+                    self.stop_button.setStyleSheet("")
+            except RuntimeError:
+                pass
             QMessageBox.critical(
                 self,
                 "Playback Error",
                 f"Error playing audio:\n{str(e)}"
             )
-            self.is_playing = False
-            self.play_button.setEnabled(True)
-            self.stop_button.setEnabled(False)
-            self.stop_button.setStyleSheet("")
     
     def _play_audio_in_thread(self, audio_data: np.ndarray, sample_rate: int):
         """Play audio in background thread without blocking UI."""
+        main_window = self.window()
         try:
             import sounddevice as sd
+            print(f"[DEBUG] Audio thread started: data shape={audio_data.shape}, sample_rate={sample_rate}")
             sd.play(audio_data, samplerate=int(sample_rate))
             sd.wait()  # Block only this thread, not the UI thread
+            print(f"[DEBUG] Audio thread finished (sd.wait completed)")
         except Exception as e:
-            print(f"Playback error: {e}")
+            print(f"[ERROR] Playback error: {e}")
         finally:
+            # Signal that thread work is complete (set before emitting signal)
+            if hasattr(main_window, 'playback_thread_finished'):
+                main_window.playback_thread_finished.set()
             # Emit signal to notify main thread - thread-safe
             self.playback_finished.emit()
     
     def stop_playback(self):
         """Stop audio playback (thread-safe - only calls sounddevice.stop())."""
+        main_window = self.window()
+        
+        # Prevent concurrent stop calls which can cause crashes
+        if self.stop_in_progress:
+            return
+        
+        if hasattr(main_window, 'is_playing') and not main_window.is_playing:
+            return
+        
+        self.stop_in_progress = True
+        print(f"[DEBUG] Stop playback called in timeseries")
         try:
             import sounddevice as sd
             sd.stop()
+            print(f"[DEBUG] sd.stop() called")
             # Don't modify UI here - let playback_finished signal handle it
         except Exception as e:
-            print(f"Error stopping playback: {e}")
+            print(f"[ERROR] Error stopping playback: {e}")
+        finally:
+            self.stop_in_progress = False
     
     def on_playback_finished(self):
         """Handle playback finished signal from background thread (runs on main thread)."""
+        print(f"[DEBUG] Playback finished signal received")
         self.is_playing = False
-        if self.play_button:
-            self.play_button.setEnabled(True)
-        if self.stop_button:
-            self.stop_button.setEnabled(False)
-            self.stop_button.setStyleSheet("")
+        main_window = self.window()
+        if hasattr(main_window, 'is_playing'):
+            main_window.is_playing = False
+        
+        # Fix 2: Add error checking when accessing buttons
+        try:
+            if self.play_button:
+                self.play_button.setEnabled(True)
+        except RuntimeError as e:
+            print(f"[ERROR] Error enabling play button: {e}")
+        
+        try:
+            if self.stop_button:
+                self.stop_button.setEnabled(False)
+                self.stop_button.setStyleSheet("")
+        except RuntimeError as e:
+            print(f"[ERROR] Error disabling stop button: {e}")
     
     def keyPressEvent(self, event):
         """Handle key press events - pass to parent for global hotkey handling."""
