@@ -17,6 +17,9 @@ class ParameterPanel(QWidget):
     # Signal emitted when STFT parameters change
     stft_parameters_changed = pyqtSignal(int, float, str, bool, float, float, float)  # window_size, overlap, window_type, use_db, db_ref, vmin, vmax
     
+    # Signal emitted when FFT parameters change
+    fft_parameters_changed = pyqtSignal(int, str)  # nperseg, window
+    
     def __init__(self, parent=None):
         super().__init__(parent)
         self.init_ui()
@@ -115,9 +118,25 @@ class ParameterPanel(QWidget):
         apply_stft_btn.clicked.connect(self.emit_stft_parameters)
         main_layout.addWidget(apply_stft_btn)
         
-        # FFT Parameters Group (future expansion)
+        # FFT Parameters Group
         fft_group = QGroupBox("FFT Parameters")
         fft_layout = QFormLayout()
+        
+        # FFT segment size (nperseg)
+        self.fft_nperseg_spin = QSpinBox()
+        self.fft_nperseg_spin.setMinimum(64)
+        self.fft_nperseg_spin.setMaximum(8192)
+        self.fft_nperseg_spin.setValue(256)
+        self.fft_nperseg_spin.setSingleStep(64)
+        self.fft_nperseg_spin.setToolTip("FFT segment size (number of samples per FFT window)")
+        fft_layout.addRow("Segment Size:", self.fft_nperseg_spin)
+        
+        # FFT window type
+        self.fft_window_combo = QComboBox()
+        self.fft_window_combo.addItems(['hann', 'hamming', 'blackman', 'bartlett'])
+        self.fft_window_combo.setCurrentText('hann')
+        self.fft_window_combo.setToolTip("Window function type for FFT")
+        fft_layout.addRow("Window:", self.fft_window_combo)
         
         # Channel selection for FFT
         self.fft_channel_combo = QComboBox()
@@ -127,6 +146,11 @@ class ParameterPanel(QWidget):
         
         fft_group.setLayout(fft_layout)
         main_layout.addWidget(fft_group)
+        
+        # Apply button for FFT parameters
+        apply_fft_btn = QPushButton("Apply FFT Parameters")
+        apply_fft_btn.clicked.connect(self.emit_fft_parameters)
+        main_layout.addWidget(apply_fft_btn)
         
         # Add stretch to push everything to the top
         main_layout.addStretch()
@@ -204,6 +228,31 @@ class ParameterPanel(QWidget):
         self.db_ref_spin.setValue(db_ref)
         self.vmin_spin.setValue(vmin)
         self.vmax_spin.setValue(vmax)
+    
+    def emit_fft_parameters(self):
+        """Emit signal with current FFT parameters."""
+        nperseg = self.fft_nperseg_spin.value()
+        window = self.fft_window_combo.currentText()
+        self.fft_parameters_changed.emit(nperseg, window)
+    
+    def get_fft_parameters(self):
+        """
+        Get current FFT parameters.
+        
+        Returns:
+            Tuple of (nperseg, window)
+        """
+        return (
+            self.fft_nperseg_spin.value(),
+            self.fft_window_combo.currentText()
+        )
+    
+    def set_fft_parameters(self, nperseg: int, window: str):
+        """Set FFT parameters."""
+        self.fft_nperseg_spin.setValue(nperseg)
+        index = self.fft_window_combo.findText(window)
+        if index >= 0:
+            self.fft_window_combo.setCurrentIndex(index)
     
     def get_selected_fft_channel(self):
         """

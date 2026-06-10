@@ -72,8 +72,16 @@ def main():
     data[:, 0] = timestamps
 
     for channel, (key, signal) in enumerate(p_data.items()):
-        signal = np.array(signal)
-        signal = apply_butterworth_filter(signal, cutoff=100, filter_direction="high", fs=config["sample_rate"], order=4)
+        if "earbud" in key.lower():
+            signal = np.array(signal)
+            signal = apply_butterworth_filter(signal, cutoff=100, filter_direction="high", fs=config["sample_rate"], order=4)
+        if "ppg" in key.lower():
+            signal = np.array(signal)
+            signal = np.diff(np.diff(signal))
+            signal = [signal[0], signal[0]] + signal.tolist()
+            signal = apply_butterworth_filter(signal, cutoff=15, filter_direction="low", fs=config["sample_rate"], order=4)
+
+
         data[:, channel+1] = signal
         print(data[:, channel+1].shape, np.max(data[:, channel+1]), np.min(data[:, channel+1]))
 

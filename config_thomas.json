@@ -1,7 +1,8 @@
 {
   "channel_names": [
     "Earbud_Left",
-    "Digital_Stethoscope"
+    "Digital_Stethoscope",
+    "ECG"
   ],
   "labels": [
     {
@@ -43,7 +44,7 @@
   },
   "data_path": "D:\\Datasets\\BP_Set_Release\\downsampled_data",
   "voice_annots_path": "D:\\Datasets\\BP_Set_Release\\activity_labels",
-  "channels_to_load": ["Earbud_Left.npy", "Digital_Stethoscope.npy"],
+  "channels_to_load": ["Earbud_Left.npy","Digital_Stethoscope.npy", "ECG.npy"],
   "data_save_loc": "./participant_data",
   "sample_rate": 1000,
   "annot_sample_rate": 8000,

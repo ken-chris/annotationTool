@@ -24,6 +24,11 @@ class FFTWidget(QWidget):
         self.sensor_data: Optional[SensorData] = None
         self.plot_widgets: List[pg.PlotWidget] = []
         self.info_labels: List[QLabel] = []
+        
+        # FFT parameters
+        self.fft_nperseg: int = 256
+        self.fft_window: str = 'hann'
+        
         self.init_ui()
     
     def init_ui(self):
@@ -156,7 +161,7 @@ class FFTWidget(QWidget):
             
             # Get channel data
             channel_data = data_slice[:, i]
-            frequencies, magnitudes = compute_fft(channel_data, self.sensor_data.sample_rate)
+            frequencies, magnitudes = compute_fft(channel_data, self.sensor_data.sample_rate, self.fft_nperseg, self.fft_window)
             
             # Plot FFT with black color for all channels
             plot_widget.plot(
@@ -197,3 +202,14 @@ class FFTWidget(QWidget):
             f"FFT Region: {start_time:.3f}s to {end_time:.3f}s "
             f"({end_time-start_time:.3f}s, {len(timestamps)} samples)"
         )
+    
+    def set_fft_parameters(self, nperseg: int, window: str):
+        """
+        Set FFT parameters and trigger recomputation if data exists.
+        
+        Args:
+            nperseg: Number of samples per segment
+            window: Window function type
+        """
+        self.fft_nperseg = nperseg
+        self.fft_window = window

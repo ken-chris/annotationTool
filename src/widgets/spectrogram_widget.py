@@ -34,6 +34,8 @@ class SpectrogramWidget(QWidget):
     region_changed = pyqtSignal(float, float)  # start, end
     # Signal emitted when playback finishes (thread-safe)
     playback_finished = pyqtSignal()
+    # Signal emitted when playback is stopped (thread-safe)
+    playback_stopped = pyqtSignal()
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -56,6 +58,7 @@ class SpectrogramWidget(QWidget):
         self.stop_button: Optional[QPushButton] = None
         self.channel_combo: Optional[QComboBox] = None
         self.stop_in_progress: bool = False  # Flag to prevent concurrent stop calls
+        self.force_stop_requested: bool = False  # Flag to track if sd.stop() was called
         
         # Threading control for playback (fix issue 4: wait for thread completion)
         self.playback_lock = threading.Lock()  # Serialize playback operations
@@ -79,8 +82,9 @@ class SpectrogramWidget(QWidget):
         
         self.init_ui()
         
-        # Connect playback finished signal
+        # Connect playback signals
         self.playback_finished.connect(self.on_playback_finished)
+        self.playback_stopped.connect(self.on_playback_stopped)
     
     def init_ui(self):
         """Initialize the user interface."""
@@ -659,13 +663,23 @@ class SpectrogramWidget(QWidget):
             sd.wait()  # Block only this thread, not the UI thread
             print(f"[DEBUG] Audio thread finished (sd.wait completed)")
         except Exception as e:
-            print(f"[ERROR] Playback error: {e}")
+            print(f"[ERROR] Playback error during sd.wait/sd.play: {e}")
         finally:
             # Signal that thread work is complete (set before emitting signal)
             if hasattr(main_window, 'playback_thread_finished'):
                 main_window.playback_thread_finished.set()
-            # Emit signal to notify main thread - thread-safe
-            self.playback_finished.emit()
+            
+            # Only emit signal if stop wasn't forcefully requested
+            # If sd.stop() was called, don't emit signal to avoid crashes
+            if not self.force_stop_requested:
+                try:
+                    print(f"[DEBUG] Emitting playback_finished signal")
+                    self.playback_finished.emit()
+                except Exception as e:
+                    print(f"[ERROR] Error emitting playback_finished signal: {e}")
+            else:
+                print(f"[DEBUG] Force stop was requested, skipping signal emission to avoid crash")
+                self.force_stop_requested = False  # Reset flag
     
     def stop_playback(self):
         """Stop audio playback (thread-safe - only calls sounddevice.stop())."""
@@ -679,38 +693,114 @@ class SpectrogramWidget(QWidget):
             return
         
         self.stop_in_progress = True
+        self.force_stop_requested = True  # Flag: don't emit signal after this
         print(f"[DEBUG] Stop playback called in spectrogram")
         try:
             import sounddevice as sd
             sd.stop()
             print(f"[DEBUG] sd.stop() called")
-            # Don't modify UI here - let playback_finished signal handle it
         except Exception as e:
             print(f"[ERROR] Error stopping playback: {e}")
         finally:
             self.stop_in_progress = False
+            # Wait for audio thread to finish cleanup before emitting signal
+            # This prevents race condition where audio thread finally block and signal handler run in parallel
+            if hasattr(main_window, 'playback_thread_finished'):
+                print(f"[DEBUG] Waiting for audio thread to complete...")
+                main_window.playback_thread_finished.wait(timeout=1.0)
+                print(f"[DEBUG] Audio thread completed, now emitting playback_stopped signal")
+            
+            try:
+                self.playback_stopped.emit()
+            except Exception as e:
+                print(f"[ERROR] Error emitting playback_stopped: {e}")
     
     def on_playback_finished(self):
         """Handle playback finished signal from background thread (runs on main thread)."""
-        print(f"[DEBUG] Playback finished signal received")
-        self.is_playing = False
-        main_window = self.window()
-        if hasattr(main_window, 'is_playing'):
-            main_window.is_playing = False
-        
-        # Fix 2: Add error checking when accessing buttons
         try:
-            if self.play_button:
-                self.play_button.setEnabled(True)
-        except RuntimeError as e:
-            print(f"[ERROR] Error enabling play button: {e}")
+            print(f"[DEBUG] Playback finished signal received")
+            self.is_playing = False
+            
+            # Check if main window still exists (it might be destroyed)
+            try:
+                main_window = self.window()
+                if main_window and hasattr(main_window, 'is_playing'):
+                    main_window.is_playing = False
+            except Exception as e:
+                print(f"[WARNING] Could not access main_window in on_playback_finished: {e}")
+            
+            # Update button states with extreme caution
+            # These might be deleted or invalid after sd.stop() forcefully terminates thread
+            try:
+                if self.play_button and self.play_button.isEnabled() == False:
+                    self.play_button.setEnabled(True)
+                    print(f"[DEBUG] Play button re-enabled")
+            except Exception as e:
+                print(f"[WARNING] Could not update play button: {e}")
+            
+            try:
+                if self.stop_button and self.stop_button.isEnabled() == True:
+                    self.stop_button.setEnabled(False)
+                    self.stop_button.setStyleSheet("")
+                    print(f"[DEBUG] Stop button disabled")
+            except Exception as e:
+                print(f"[WARNING] Could not update stop button: {e}")
         
+        except Exception as e:
+            print(f"[ERROR] Unhandled error in on_playback_finished: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    def on_playback_stopped(self):
+        """Handle playback stopped signal from stop_playback() (runs on main thread)."""
         try:
-            if self.stop_button:
-                self.stop_button.setEnabled(False)
-                self.stop_button.setStyleSheet("")
-        except RuntimeError as e:
-            print(f"[ERROR] Error disabling stop button: {e}")
+            print(f"[DEBUG] on_playback_stopped handler called")
+            self.is_playing = False
+            
+            # Check if main window still exists
+            try:
+                main_window = self.window()
+                if main_window and hasattr(main_window, 'is_playing'):
+                    main_window.is_playing = False
+                    print(f"[DEBUG] Set main_window.is_playing = False")
+            except Exception as e:
+                print(f"[WARNING] Could not access main_window in on_playback_stopped: {e}")
+            
+            # Update button states - check both that button exists AND isVisible
+            # (invisible widgets might be in wrong state or partially destroyed)
+            try:
+                if self.play_button and self.play_button.isVisible():
+                    if not self.play_button.isEnabled():
+                        self.play_button.setEnabled(True)
+                        print(f"[DEBUG] Play button re-enabled after stop")
+                    else:
+                        print(f"[DEBUG] Play button already enabled")
+                else:
+                    print(f"[DEBUG] Play button not visible or doesn't exist")
+            except RuntimeError as e:
+                print(f"[WARNING] RuntimeError accessing play button: {e}")
+            except Exception as e:
+                print(f"[WARNING] Could not update play button: {e}")
+            
+            try:
+                if self.stop_button and self.stop_button.isVisible():
+                    if self.stop_button.isEnabled():
+                        self.stop_button.setEnabled(False)
+                        self.stop_button.setStyleSheet("")
+                        print(f"[DEBUG] Stop button disabled after stop")
+                    else:
+                        print(f"[DEBUG] Stop button already disabled")
+                else:
+                    print(f"[DEBUG] Stop button not visible or doesn't exist")
+            except RuntimeError as e:
+                print(f"[WARNING] RuntimeError accessing stop button: {e}")
+            except Exception as e:
+                print(f"[WARNING] Could not update stop button: {e}")
+        
+        except Exception as e:
+            print(f"[ERROR] Unhandled error in on_playback_stopped: {e}")
+            import traceback
+            traceback.print_exc()
     
     def keyPressEvent(self, event):
         """Handle key press events - pass to parent for global hotkey handling."""

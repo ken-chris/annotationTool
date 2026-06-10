@@ -6,27 +6,26 @@ from scipy import signal
 from typing import Tuple, Optional
 
 
-def compute_fft(data: np.ndarray, sample_rate: float) -> Tuple[np.ndarray, np.ndarray]:
+def compute_fft(data: np.ndarray, sample_rate: float, nperseg: int = 256, window: str = 'hann') -> Tuple[np.ndarray, np.ndarray]:
     """
-    Compute FFT of a signal.
+    Compute FFT of a signal using Welch's method for windowed FFT.
     
     Args:
         data: 1D array of signal data
         sample_rate: Sampling rate in Hz
+        nperseg: Length of each segment for windowed FFT (default 256)
+        window: Window function type ('hann', 'hamming', 'blackman', 'bartlett', etc.)
         
     Returns:
         Tuple of (frequencies, magnitudes)
     """
-    n = len(data)
-    
-    # Compute FFT
-    fft_vals = np.fft.fft(data)
-    fft_freq = np.fft.fftfreq(n, 1.0 / sample_rate)
-    
-    # Take positive frequencies only
-    positive_freq_idx = fft_freq > 0
-    frequencies = fft_freq[positive_freq_idx]
-    magnitudes = np.abs(fft_vals[positive_freq_idx])
+    # Use Welch's method for FFT with windowing
+    frequencies, magnitudes = signal.welch(
+        data,
+        fs=sample_rate,
+        nperseg=nperseg,
+        window=window
+    )
     
     return frequencies, magnitudes
 

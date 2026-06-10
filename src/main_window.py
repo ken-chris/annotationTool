@@ -91,6 +91,7 @@ class MainWindow(QMainWindow):
         # Create parameter panel
         self.parameter_panel = ParameterPanel()
         self.parameter_panel.stft_parameters_changed.connect(self.on_stft_parameters_changed)
+        self.parameter_panel.fft_parameters_changed.connect(self.on_fft_parameters_changed)
         left_layout.addWidget(self.parameter_panel)
         
         left_layout.addStretch()
@@ -513,6 +514,13 @@ class MainWindow(QMainWindow):
             f"type={window_type}, {db_info}"
         )
     
+    def on_fft_parameters_changed(self, nperseg: int, window: str):
+        """Handle FFT parameter changes."""
+        self.fft_widget.set_fft_parameters(nperseg, window)
+        self.config.fft.nperseg = nperseg
+        self.config.fft.window = window
+        self.statusBar().showMessage(f"FFT updated: segment size={nperseg}, window={window}", 2000)
+    
     def on_label_selected(self, label_name: str, color: tuple):
         """Handle annotation label selection."""
         self.current_annotation_label = label_name
@@ -633,6 +641,10 @@ class MainWindow(QMainWindow):
             self.config.stft.vmax
         )
         
+        # Apply FFT parameters
+        self.parameter_panel.set_fft_parameters(self.config.fft.nperseg, self.config.fft.window)
+        self.fft_widget.set_fft_parameters(self.config.fft.nperseg, self.config.fft.window)
+        
         # Update spectrogram with new parameters
         if self.sensor_data:
             self.on_stft_parameters_changed(
@@ -666,24 +678,11 @@ class MainWindow(QMainWindow):
                     self.parameter_panel.update_channel_list(self.sensor_data.channel_names)
                 
                 self.apply_config()
-                self.statusBar().showMessage(f"Configuration loaded from {filename}", 3000)
-                QMessageBox.information(
-                    self,
-                    "Config Loaded",
-                    f"Configuration successfully loaded from:\n{filename}"
-                )
+                self.statusBar().showMessage(f"✓ Configuration loaded successfully", 2000)
             except FileNotFoundError:
-                QMessageBox.critical(
-                    self,
-                    "Error",
-                    f"Configuration file not found:\n{filename}"
-                )
+                self.statusBar().showMessage(f"✗ Configuration file not found: {filename}", 2000)
             except Exception as e:
-                QMessageBox.critical(
-                    self,
-                    "Error",
-                    f"Error loading configuration:\n{str(e)}"
-                )
+                self.statusBar().showMessage(f"✗ Error loading configuration: {str(e)}", 2000)
     
     def save_config_file(self):
         """Save current configuration to JSON file."""
